@@ -73,7 +73,6 @@ def decode_tokens(token_ids: list[int], vocab: dict[int, bytes]) -> str:
     return "".join(decode_token(token_id, vocab) for token_id in token_ids)
 
 def pretokenize(text: str):
-    """Pre-tokenize text using GPT-2 pretokenization pattern."""
     pattern = re.compile(REGEX_PATTERN)
     for match in re.finditer(pattern, text):
         yield match.group(0)
@@ -123,15 +122,17 @@ def train_bpe(input_path: str, vocab_size: int = 500, special_tokens: list[str] 
     # Read file as binary and decode with error handling (like chunking approach)
     with open(input_path, "rb") as f:
         content = f.read()
-    
-    # Decode with error handling (same as chunking approach)
-    text = content.decode("utf-8", errors="ignore")
-    
-    # Remove special tokens from text as it is not used in BPE training as they are just separators
+
+    # Remove special tokens at byte level
     if special_tokens:
-        pattern = "|".join(map(re.escape, special_tokens))
-        text = re.sub(pattern, "", text)
-    
+        for tok in special_tokens:
+            if isinstance(tok, str):
+                tok = tok.encode("utf-8")
+            content = content.replace(tok, b"")
+
+    # Now decode
+    text = content.decode("utf-8", errors="ignore")
+
     # Process text using pretokenization
     for tok in pretokenize(text):
         bs = tok.encode("utf-8")

@@ -1,5 +1,5 @@
 import pickle
-from cs336_basics.bpe import train_bpe
+from cs336_basics.tokenization.bpe import train_bpe
 
 FILE = "tests/fixtures/tinystories_sample_5M.txt"
 VOCAB_SIZE = 1000

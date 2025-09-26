@@ -4,7 +4,9 @@ import os
 from collections.abc import Iterable
 from typing import IO, Any, BinaryIO
 
-from cs336_basics.bpe import train_bpe
+from cs336_basics.tokenization.bpe import train_bpe
+from cs336_basics.layer_normalization.rmsnorm import RMSNorm
+from cs336_basics.swiglu.swiglu import SwiGLUFeedForward, silu
 import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
@@ -77,14 +79,26 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
-    # Example:
-    # If your state dict keys match, you can use `load_state_dict()`
-    # swiglu.load_state_dict(weights)
-    # You can also manually assign the weights
-    # swiglu.w1.weight.data = w1_weight
-    # swiglu.w2.weight.data = w2_weight
-    # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+
+    def get_compatible_dff(d_model: int) -> int:
+        """
+        Returns the nearest multiple of 64 to 8/3 * d_model.
+        """
+        raw = (8 * d_model) / 3
+        rounded = int((raw + 32) // 64) * 64  # round to nearest multiple of 64
+        return rounded
+    
+    d_ff_83 = get_compatible_dff(d_model)
+    print(f"Expected d_ff to be {d_ff_83} based on d_model {d_model}; here we got d_ff to be {d_ff}.")
+
+    device, dtype = in_features.device, in_features.dtype
+    model = SwiGLUFeedForward(d_model, d_ff, device=device, dtype=dtype)
+    model.load_state_dict({
+        "w1.weight": w1_weight,
+        "w2.weight": w2_weight,
+        "w3.weight": w3_weight,
+    })
+    return model(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -379,7 +393,10 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    device, dtype = in_features.device, in_features.dtype
+    model = RMSNorm(d_model, eps, device=device, dtype=dtype)
+    model.load_state_dict({'weight': weights})
+    return model(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -393,7 +410,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return silu(in_features)
 
 
 def run_get_batch(
