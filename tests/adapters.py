@@ -612,6 +612,5 @@ def run_train_bpe(
         vocab_size=vocab_size,
         special_tokens=special_tokens,
     )
-    # vocab, merges = train_bpe(input_path, vocab_size, special_tokens)
 
     return vocab, merges

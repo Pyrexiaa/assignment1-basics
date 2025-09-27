@@ -72,10 +72,11 @@ def decode_tokens(token_ids: list[int], vocab: dict[int, bytes]) -> str:
     """Decode a list of token IDs to string."""
     return "".join(decode_token(token_id, vocab) for token_id in token_ids)
 
-def pretokenize(text: str):
+def pretokenize(texts: list[str]):
     pattern = re.compile(REGEX_PATTERN)
-    for match in re.finditer(pattern, text):
-        yield match.group(0)
+    for t in texts:
+        for match in re.finditer(pattern, t):
+            yield match.group(0)
 
 def get_stats(token_counts: Counter[tuple[int, ...]]) -> Counter[tuple[int, int]]:
     """Count adjacent pairs efficiently using frequency data."""
@@ -122,16 +123,14 @@ def train_bpe(input_path: str, vocab_size: int = 500, special_tokens: list[str] 
     # Read file as binary and decode with error handling (like chunking approach)
     with open(input_path, "rb") as f:
         content = f.read()
-
-    # Remove special tokens at byte level
-    if special_tokens:
-        for tok in special_tokens:
-            if isinstance(tok, str):
-                tok = tok.encode("utf-8")
-            content = content.replace(tok, b"")
-
-    # Now decode
+    
+    # Decode with error handling (same as chunking approach)
     text = content.decode("utf-8", errors="ignore")
+    
+    # Remove special tokens from text as it is not used in BPE training as they are just separators
+    if special_tokens:
+        pattern = "|".join(map(re.escape, special_tokens))
+        text = re.split(pattern, text)
 
     # Process text using pretokenization
     for tok in pretokenize(text):
@@ -147,9 +146,16 @@ def train_bpe(input_path: str, vocab_size: int = 500, special_tokens: list[str] 
         if not stats:
             break
 
-        # Pick most frequent pair with deterministic tie-breaking
-        # Use the same tie-breaking as the second implementation
-        best_pair = max(stats, key=lambda p: (stats[p], vocab[p[0]] + vocab[p[1]]))
+        # # Pick most frequent pair with deterministic tie-breaking
+        # best_pair = max(stats, key=lambda p: (stats[p], vocab[p[0]] + vocab[p[1]]))
+
+        # The above pair selection is not working because of the concatenation order
+        # If concatenation: b'a' + b'bc' = b'abc' and b'ab' + b'c' = b'abc'
+        # When compared lexicographically: b'abc' = b'abc', so first b'abc' would be chosen
+        # However, if we compare the tuples directly, b'a' < b'ab', so pair with b'ab' would be chosen first
+        # Hence, the second pair of b'ab' + b'c' would be chosen first
+        # Insight: Concatenation loses the information of word boundaries, resulting in different original pairs
+        best_pair = max(stats, key=lambda p: (stats[p], (vocab[p[0]], vocab[p[1]])))
 
         # Add new merged token to vocab
         merged_bytes = vocab[best_pair[0]] + vocab[best_pair[1]]

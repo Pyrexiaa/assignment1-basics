@@ -72,11 +72,11 @@ def decode_tokens(token_ids: list[int], vocab: dict[int, bytes]) -> str:
     """Decode a list of token IDs to string."""
     return "".join(decode_token(token_id, vocab) for token_id in token_ids)
 
-def pretokenize(text: str):
-    """Pre-tokenize text using GPT-2 pretokenization pattern."""
+def pretokenize(texts: list[str]):
     pattern = re.compile(REGEX_PATTERN)
-    for match in re.finditer(pattern, text):
-        yield match.group(0)
+    for t in texts:
+        for match in re.finditer(pattern, t):
+            yield match.group(0)
 
 def get_stats(token_counts: Counter[tuple[int, ...]]) -> Counter[tuple[int, int]]:
     """Count adjacent pairs efficiently using frequency data."""
@@ -130,8 +130,8 @@ def train_bpe(input_path: str, vocab_size: int = 500, special_tokens: list[str] 
     # Remove special tokens from text as it is not used in BPE training as they are just separators
     if special_tokens:
         pattern = "|".join(map(re.escape, special_tokens))
-        text = re.sub(pattern, "", text)
-    
+        text = re.split(pattern, text)
+
     # Process text using pretokenization
     for tok in pretokenize(text):
         bs = tok.encode("utf-8")
@@ -146,9 +146,16 @@ def train_bpe(input_path: str, vocab_size: int = 500, special_tokens: list[str] 
         if not stats:
             break
 
-        # Pick most frequent pair with deterministic tie-breaking
-        # Use the same tie-breaking as the second implementation
-        best_pair = max(stats, key=lambda p: (stats[p], vocab[p[0]] + vocab[p[1]]))
+        # # Pick most frequent pair with deterministic tie-breaking
+        # best_pair = max(stats, key=lambda p: (stats[p], vocab[p[0]] + vocab[p[1]]))
+
+        # The above pair selection is not working because of the concatenation order
+        # If concatenation: b'a' + b'bc' = b'abc' and b'ab' + b'c' = b'abc'
+        # When compared lexicographically: b'abc' = b'abc', so first b'abc' would be chosen
+        # However, if we compare the tuples directly, b'a' < b'ab', so pair with b'ab' would be chosen first
+        # Hence, the second pair of b'ab' + b'c' would be chosen first
+        # Insight: Concatenation loses the information of word boundaries, resulting in different original pairs
+        best_pair = max(stats, key=lambda p: (stats[p], (vocab[p[0]], vocab[p[1]])))
 
         # Add new merged token to vocab
         merged_bytes = vocab[best_pair[0]] + vocab[best_pair[1]]
@@ -177,12 +184,12 @@ def train_bpe_from_string(input_string: str, vocab_size: int = 500, special_toke
     
     # Process file similar to the working implementation
     token_counts = Counter()
-    
-    # Remove special tokens from text (same pattern as working implementation)
+
+    # Remove special tokens from text as it is not used in BPE training as they are just separators
     if special_tokens:
         pattern = "|".join(map(re.escape, special_tokens))
-        text = re.sub(pattern, "", input_string)
-    
+        text = re.split(pattern, input_string)
+
     # Process text using pretokenization
     for tok in pretokenize(text):
         bs = tok.encode("utf-8")
@@ -192,16 +199,23 @@ def train_bpe_from_string(input_string: str, vocab_size: int = 500, special_toke
     print(f"Token Counts: {token_counts.most_common(5)}")
 
     merges = []
-    
+
     while len(vocab) < vocab_size:
         # Get pair statistics efficiently
         stats = get_stats(token_counts)
         if not stats:
             break
 
-        # Pick most frequent pair
-        best_pair = max(stats, key=stats.get)
-        print(f"Best Pair: {best_pair} with count {stats[best_pair]}")
+        # # Pick most frequent pair with deterministic tie-breaking
+        # best_pair = max(stats, key=lambda p: (stats[p], vocab[p[0]] + vocab[p[1]]))
+
+        # The above pair selection is not working because of the concatenation order
+        # If concatenation: b'a' + b'bc' = b'abc' and b'ab' + b'c' = b'abc'
+        # When compared lexicographically: b'abc' = b'abc', so first b'abc' would be chosen
+        # However, if we compare the tuples directly, b'a' < b'ab', so pair with b'ab' would be chosen first
+        # Hence, the second pair of b'ab' + b'c' would be chosen first
+        # Insight: Concatenation loses the information of word boundaries, resulting in different original pairs
+        best_pair = max(stats, key=lambda p: (stats[p], (vocab[p[0]], vocab[p[1]])))
 
         # Add new merged token to vocab
         merged_bytes = vocab[best_pair[0]] + vocab[best_pair[1]]
@@ -210,25 +224,13 @@ def train_bpe_from_string(input_string: str, vocab_size: int = 500, special_toke
 
         # Merge pairs in token sequences
         token_counts = merge_pair(token_counts, best_pair, next_id)
-        print(f"Token Counts: {token_counts.most_common(5)}")
         
-        # Debug output
-        merged_str = decode_key(merged_bytes, vocab)
-        print(f"Step {len(merges)}: merged {best_pair} → '{merged_str}'")
-        
-        # Show example of current tokenization
-        if token_counts:
-            example_seq = next(iter(token_counts.keys()))
-            example_decoded = decode_tokens(list(example_seq), vocab)
-            print(f"Example tokenization: {example_decoded}")
-
         next_id += 1
 
-    # Final results
-    decoded_vocab = display_vocab(vocab)
-    print(f"Final vocab size: {len(decoded_vocab)}")
+    # Return the raw vocab (int -> bytes) and merges, not the display version
+    print(f"Final vocab size: {len(vocab)}")
     
-    return decoded_vocab, merges
+    return vocab, merges
 
 if __name__ == "__main__":
     test_string = (
